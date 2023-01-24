@@ -10,9 +10,9 @@ def main():
      
      func1=parse_arguments()
      func2=quality_check()
-     func3=run_alignment()
+     #func3=run_alignment()
      func4=run_mast()
-     #func4=analyze_mast_output()
+     func4=analyze_mast_output()
 
 def parse_arguments():
 
@@ -21,14 +21,14 @@ def parse_arguments():
     parser.add_argument('-d', '--database', action='store', dest='TFdatabase', type=str, required=True, help="path to PWM file for TFs in MEME format")
     parser.add_argument('-o', '--output', action='store', dest='outfile', type=str, help="name of the output file", default="out")
     args=parser.parse_args()
+     
+    path=str(args.outfile)
 
     infile=str(os.path.basename(args.infile))
     TFdatabase=str(os.path.basename(args.TFdatabase))
     outfile=str(os.path.basename(args.outfile))
-    data=[infile, TFdatabase, outfile]
+    data=[infile, TFdatabase, outfile, path]
     return(data)
-
-    #os.system('mast -o '+ outfile+ ' -nostatus -minseqs 1 -remcorr -ev 10.0 ' +TFdatabase+ ' '+infile)
 
 def quality_check():
     data=parse_arguments()
@@ -47,38 +47,35 @@ def quality_check():
 
     return(fasta)
 
+#This function also does a pairwise alignment of the sequnces provided. This gives the user a rough estimation of where the differences lie
 def run_alignment():
-
     func=parse_arguments()
-
     sys.stdout=open(func[2], 'w')
-
     fasta_list=quality_check()
-
     aligner=Align.PairwiseAligner()
     alignment= aligner.align(fasta_list[0], fasta_list[1])
     for alignments in alignment:
-        print("Score = %.1f" %alignments.score)
-        print(alignments)
+        Score = alignments.score
+    print(Score, '\n', alignments)
 
+#This function calls the meme module and runs the mast function
+##Unable to load the meme module while running this. Need to have a closer look at this
 def run_mast():
 
     argument_list=parse_arguments()
     os.system('module load meme')
     os.system('mast -o '+ argument_list[2]+ ' -nostatus -minseqs 1 -remcorr -ev 10.0 ' +argument_list[1]+ ' '+argument_list[0])
-    #output needs to be stored here and then checked 
+    os.system('mast -hit_list -nostatus -minseqs 1 -remcorr -ev 10.0 HOCOMOCOv11_core_HUMAN_mono_meme_format.meme fasta_test_2seq.txt >'+ argument_list[2]+'/hit_list_temp.txt') 
 
 def analyze_mast_output():
     seqID=[]
     outfile_location=parse_arguments()
-    mast_hit_file= outfile_location[2]
-    path_out=outfile_location[3]
     sys.stdout=open("Differential_analysis_file.txt", 'w')
 
-    for record in SeqIO.parse(path_out+mast_hit_file, "fasta"):
+    for record in SeqIO.parse(outfile_location[0], "fasta"):
         seqID.append(record.id)
 
-    with open(path_out+mast_hit_file, 'r') as file:
+    with open(outfile_location[2]+'/hit_list_temp.txt', 'r') as file:
         list1=[]
         list2=[]
         for each in file:
@@ -87,39 +84,43 @@ def analyze_mast_output():
                   header=re.sub(r'# sequence_name',"sequence_name", each)
             
             if not re.search('#', each):
-                  re.sub(r'\n',"", each)
                   if str(each.split()[0])==str(seqID[0]):
-                        list1.append(each)
-                  elif str(each.split()[0])==str(seqID[1]):
-                        list2.append(each)
-
+                    list1.append(re.sub(str(seqID[0]), "", each))
+                elif str(each.split()[0])==str(seqID[1]):
+                    list2.append(re.sub(str(seqID[1]), "", each))
         i=len(list1)
         j=len(list2)
         if i == j:
-              print("The two sequences have equal number of TF binding motifs, check further for details regard")
+              print("The two sequences have equal number of TF binding motifs, check further for detailed analysis")
+              diff=0
               while i>=0:
-                    var1=list1[i-1]
-                    var2=list2[i-1]
-                    i=i-1
-                    if str(var1) != str(var2):
-                          #this is for difference in TF binding motif itself
-                          if var1.split()[2] != var2.split()[2]:
-                                print(var1)
-                                print (var2, '\n')
+                    var1=str(list1[i-1])
+                    var2=str(list2[i-1])
+                    if var1 != var2:
+                         diff=diff+1
+                print('\n')
+                print( f'################  Difference number {diff} #######################')
+                sys.stdout.write(header)
+                sys.stdout.write(str(seqID[0])+var1)
+                print(str(seqID[1])+var2)
+                if var1.split()[1] != var2.split()[1]:
+                    print(f"Analysis: There is a difference in binding of the TF {var1.split()[1]} vs {var2.split()[1]} between the two sequences")
+                    print(f"Analysis: The position where this difference occurs is at the {var1.split()[0]}")
+                    
+                elif var1.split()[1] == var2.split()[1]:
+                    if var1.split()[0] != var2.split()[0]:
+                        print(f"Analysis: There is no difference in binding of the TF, but the position of binding has shifted from {var1.split()[1]} to {var2.split()[1]} between the two sequences")
+                    if var1.split()[-1] != var2.split()[-1]:
+                        print(f"Analysis: There is no difference in binding of the TF, but the p-value of binding has changed from {var1.split()[-1]} to {var2.split()[-2]} between the two sequences")
+                    if var1.split()[3] != var2.split()[3] or var1.split()[4] != var2.split()[4]:
+                        print(f"Analysis: There is no difference in binding of the TF, but the position of binding has chnaged from {var1.split()[3]}&{var1.split()[4]} to {var2.split()[3]}&{var2.split()[4]}  between the two sequences")
+                    
+            i=i-1
 
-                                print(f"There is a difference in binding of the TF {var1.split()[2]} vs {var2.split()[2]} between the two sequences")
-                                print(f"The position where this difference occurs is at the {var1.split()[1]}")
-                                #print(f"There is a difference in binding of the TF {var1.split()[2]} vs {var2.split()[2]} between the two sequences")
-                          elif var1.split()[2] == var2.split()[2]:
-                                if var1.split()[1] != var2.split()[1]:
-                                      
-                                      print(f"There is no difference in binding of the TF, but the position of binding has shifted from {var1.split()[1]} to {var2.split()[1]} between the two sequences")
-                                if var1.split()[-1] != var2.split()[-1]:
-                                      print(f"There is no difference in binding of the TF, but the p-value of binding (which measures how strongly a TF can bind to a region) has changed from {var1.split()[-1]} to {var2.split()[-2]} between the two sequences")
-
-                    else:
-                          print("Sorry, not much difference in your DNA sequences in terms of Motif binding")
-
+        if diff == 0:
+            sys.stdout.write("Sorry, not much difference in your DNA sequences in terms of Motif binding")
+   
+                          
 
 if __name__=='__main__':
     main()
