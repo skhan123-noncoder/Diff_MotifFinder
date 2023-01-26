@@ -8,33 +8,33 @@ import argparse
 
 def main():
      
-     func1=parse_arguments()
-     func2=quality_check()
+    user_provided_inputs=parse_arguments()
+    print(user_provided_inputs)
+     #fasta_length_check=quality_check(user_provided_inputs[0], user_provided_inputs[1])
      #func3=run_alignment()
-     func4=run_mast()
-     func4=analyze_mast_output()
+     #func4=run_mast()
+     #func4=analyze_mast_output()
 
 def parse_arguments():
-
     parser=argparse.ArgumentParser(prog='Differential Motif finder', description="Provide fasta file of containing a pair of simialr DNA sequences of equal lengths", epilog='none')
-    parser.add_argument('-i', '--input', action='store', dest='infile', type=str, required=True, help='The input fasta file to the script.')
-    parser.add_argument('-d', '--database', action='store', dest='TFdatabase', type=str, required=True, help="path to PWM file for TFs in MEME format")
-    parser.add_argument('-o', '--output', action='store', dest='outfile', type=str, help="name of the output file", default="out")
+    parser.add_argument('-i', '--fasta_file1', action='store', dest='infile1', type=str, required=True, help='The first fasta file for comparison')
+    parser.add_argument('-j', '--fasta_file2', action='store', dest='infile2', type=str, required=True, help='The second fasta file for comparison')
+    parser.add_argument('-d', '--database', action='store', dest='TFdatabase', type=str, required=True, help="path to the PWM file for TFs in MEME format")
+    parser.add_argument('-o', '--output', action='store', dest='outfile', type=str, help="name of the output file", default="out_file")
     args=parser.parse_args()
-     
     path=str(args.outfile)
 
-    infile=str(os.path.basename(args.infile))
-    TFdatabase=str(os.path.basename(args.TFdatabase))
-    outfile=str(os.path.basename(args.outfile))
-    data=[infile, TFdatabase, outfile, path]
+    #infile=str(os.path.basename(args.infile))
+    #TFdatabase=str(os.path.basename(args.TFdatabase))
+    #outfile=str(os.path.basename(args.outfile))
+    data=[infile1, infile2, TFdatabase, outfile, path]
     return(data)
 
 def quality_check():
     data=parse_arguments()
     seqID=[]
     fasta=[]
-
+    
     for record in SeqIO.parse(data[0], "fasta"):
         seqID.append(record.id)
         fasta.append(record.seq)
@@ -80,40 +80,40 @@ def analyze_mast_output():
         list2=[]
         for each in file:
             if re.search('# sequence_name', each):
-                  header=each
-                  header=re.sub(r'# sequence_name',"sequence_name", each)
+                header=each
+                header=re.sub(r'# sequence_name',"sequence_name", each)
             
             if not re.search('#', each):
-                  if str(each.split()[0])==str(seqID[0]):
+                if str(each.split()[0])==str(seqID[0]):
                     list1.append(re.sub(str(seqID[0]), "", each))
                 elif str(each.split()[0])==str(seqID[1]):
                     list2.append(re.sub(str(seqID[1]), "", each))
         i=len(list1)
         j=len(list2)
         if i == j:
-              print("The two sequences have equal number of TF binding motifs, check further for detailed analysis")
-              diff=0
-              while i>=0:
-                    var1=str(list1[i-1])
-                    var2=str(list2[i-1])
-                    if var1 != var2:
-                         diff=diff+1
+            print("The two sequences have equal number of TF binding motifs, check further for detailed analysis")
+            diff=0
+            while i>=0:
+                var1=str(list1[i-1])
+                var2=str(list2[i-1])
+                if var1 != var2:
+                    diff=diff+1
                 print('\n')
-                print( f'################  Difference number {diff} #######################')
+                #print(f"################  Difference number {diff} #######################")
                 sys.stdout.write(header)
                 sys.stdout.write(str(seqID[0])+var1)
                 print(str(seqID[1])+var2)
                 if var1.split()[1] != var2.split()[1]:
-                    print(f"Analysis: There is a difference in binding of the TF {var1.split()[1]} vs {var2.split()[1]} between the two sequences")
-                    print(f"Analysis: The position where this difference occurs is at the {var1.split()[0]}")
+                    print("Analysis: There is a difference in binding of the TF {var1.split()[1]} vs {var2.split()[1]} between the two sequences")
+                    print("Analysis: The position where this difference occurs is at the {var1.split()[0]}")
                     
                 elif var1.split()[1] == var2.split()[1]:
                     if var1.split()[0] != var2.split()[0]:
-                        print(f"Analysis: There is no difference in binding of the TF, but the position of binding has shifted from {var1.split()[1]} to {var2.split()[1]} between the two sequences")
+                        print("Analysis: There is no difference in binding of the TF, but the position of binding has shifted from {var1.split()[1]} to {var2.split()[1]} between the two sequences")
                     if var1.split()[-1] != var2.split()[-1]:
-                        print(f"Analysis: There is no difference in binding of the TF, but the p-value of binding has changed from {var1.split()[-1]} to {var2.split()[-2]} between the two sequences")
+                        print("Analysis: There is no difference in binding of the TF, but the p-value of binding has changed from {var1.split()[-1]} to {var2.split()[-2]} between the two sequences")
                     if var1.split()[3] != var2.split()[3] or var1.split()[4] != var2.split()[4]:
-                        print(f"Analysis: There is no difference in binding of the TF, but the position of binding has chnaged from {var1.split()[3]}&{var1.split()[4]} to {var2.split()[3]}&{var2.split()[4]}  between the two sequences")
+                        print("Analysis: There is no difference in binding of the TF, but the position of binding has chnaged from {var1.split()[3]}&{var1.split()[4]} to {var2.split()[3]}&{var2.split()[4]}  between the two sequences")
                     
             i=i-1
 
