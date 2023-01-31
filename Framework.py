@@ -7,6 +7,7 @@ import subprocess
 import argparse
 import tempfile
 import re
+import shutil
 
 def main():
      
@@ -14,8 +15,9 @@ def main():
     fasta_length_check=quality_check(user_provided_inputs.infile1, user_provided_inputs.infile2)
     alignment_check=run_alignment(fasta_length_check[0][0],fasta_length_check[0][1],fasta_length_check[3])
     primary_outfile=run_mast(fasta_length_check[2], user_provided_inputs.TFdatabase, user_provided_inputs.outfile,fasta_length_check[3])
-    func4=analyze_mast_output(primary_outfile,fasta_length_check[1][0],fasta_length_check[1][1],user_provided_inputs.outfile)
+    func4=analyze_mast_output(fasta_length_check[3],primary_outfile,fasta_length_check[1][0],fasta_length_check[1][1],user_provided_inputs.outfile,alignment_check)
 
+#Ask fasta files, TF database and name of the output file from the user
 def parse_arguments():
     parser=argparse.ArgumentParser(prog='Differential Motif finder', description="Provide fasta file of containing a pair of simialr DNA sequences of equal lengths", epilog='none')
     parser.add_argument('-i', '--fasta_file1', action='store', dest='infile1', type=str, required=True, help='The first fasta file for comparison')
@@ -42,7 +44,7 @@ def quality_check(fasta1, fasta2):
     else:
         print("Sequences are of same length. Performing pairwise alignment")
     
-    #Creating a temp directory where you store your combined fasta file and store the 
+    #Creating a temp directory where you store your combined fasta file and store the alignemnt file as well. This directory will be deleted at the end
     temp_dir=tempfile.mkdtemp(dir=os.path.dirname(fasta1))
     mast_fa_input=open(os.path.abspath(temp_dir)+'/mast_fasta_file','w')
     with open(fasta1,'r') as f1:
@@ -59,13 +61,17 @@ def quality_check(fasta1, fasta2):
     
     return(fasta,seqID,mast_fa_input.name,temp_dir)
 
+
+#Program to align the fasta files provided by the user. This can provide some hint into the differences in the two sequences. This will be present in the out folder
 def run_alignment(fasta_seq1,fasta_seq2,temp_dir):
 
     aligned_file=open(os.path.abspath(temp_dir)+'/alignment.txt', 'w')
     alignment= pairwise2.align.globalxx(fasta_seq1, fasta_seq2)
     aligned_file.write(format_alignment(*alignment[0]))
 
+    return(aligned_file)
 
+#The meme module needs to be loaded here. The mast output file is sent to the outfile described by the user. The hitlist is sent to the temp dir
 def run_mast(mast_fa_input,TF,outfile,temp_dir):
     subprocess.run(['mast','-nostatus','-minseqs','1','-remcorr','-ev','10.0','-o',f"{outfile}",TF,mast_fa_input])
     hit=open(temp_dir+'/hit_list.txt', 'w')
@@ -73,7 +79,9 @@ def run_mast(mast_fa_input,TF,outfile,temp_dir):
     hit.close()
     return(hit.name)
 
-def analyze_mast_output(hit_list,seq1,seq2,outfile):
+
+#Analyze the hit_list file and point out the differences. The alignment file is moved from the temporary folder to the output folder and temp dir is deleted
+def analyze_mast_output(temp_dir,hit_list,seq1,seq2,outfile,alignment_file):
     with open(hit_list,'r') as hit_file:
         comp_list1=[]
         comp_list2=[]
@@ -123,7 +131,9 @@ def analyze_mast_output(hit_list,seq1,seq2,outfile):
             analysis.write('\n')
         TF_entries=TF_entries-1
 
-    analysis.close()                
+    analysis.close()
+    subprocess.run(['mv',str(alignment_file.name),str(os.path.abspath(outfile))])
+    shutil.rmtree(temp_dir)             
 
 if __name__=='__main__':
     main()
