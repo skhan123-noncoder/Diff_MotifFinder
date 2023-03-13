@@ -6,128 +6,154 @@ import os
 import subprocess
 import argparse
 import tempfile
-import re
 import shutil
+import logging
+import pandas as pd
+
+
+logger=logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+formatter= logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
+file_handler= logging.FileHandler('DiffMotifFinder.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
 
 def main():
-     
     usr_input=parse_args()
-    fa_len_check=qual_check(usr_input.infile1, usr_input.infile2)
-    align=run_align(fa_len_check[0][0],fa_len_check[0][1],fa_len_check[3])
-    mast_out=run_mast(fa_len_check[2], usr_input.TFdatabase, usr_input.outfile,fa_len_check[3])
-    analysis=compare_mast(fa_len_check[3],mast_out,fa_len_check[1][0],fa_len_check[1][1],usr_input.outfile,align)
+    temp_dir= make_temp_dir(usr_input.outdir)
 
-#Ask fasta files, TF database and name of the output file from the user
+    try:
+        fa_len_check=qual_check(usr_input.infile1, usr_input.infile2, usr_input.TFdatabase,usr_input.outdir,temp_dir)
+        mast_out=run_mast(usr_input.infile1, usr_input.infile2, usr_input.TFdatabase,usr_input.outdir,temp_dir,fa_len_check)
+        analysis=compare_mast(usr_input.infile1, usr_input.infile2, usr_input.TFdatabase,usr_input.outdir,temp_dir,fa_len_check,mast_out)
+
+    except:
+       print("Something wrong. Cleaning up temp files")
+
+    finally:
+      clean_temp=clean_temp_dir(temp_dir)
+
+
 def parse_args():
+    
     parser=argparse.ArgumentParser(prog='Differential Motif finder', description="Provide fasta file of containing a pair of simialr DNA sequences of equal lengths", epilog='none')
+    parser.add_argument('--version', action='version', version='%(prog)s 1.0')
     parser.add_argument('-i', '--fasta_file1', action='store', dest='infile1', type=str, required=True, help='The first fasta file for comparison')
     parser.add_argument('-j', '--fasta_file2', action='store', dest='infile2', type=str, required=True, help='The second fasta file for comparison')
     parser.add_argument('-d', '--database', action='store', dest='TFdatabase', type=str, required=True, help="path to the PWM file for tf in MEME format")
-    parser.add_argument('-o', '--output', action='store', dest='outfile', type=str, help="name of the output file", default="out_file")
+    parser.add_argument('-o', '--output', action='store', dest='outdir', type=str, help="name of the output directory", default="out_dir")
     args=parser.parse_args()
+
+    logger.debug('Imported arguments from user')
 
     return(args)
 
-#Checking for the length of the fasta files. If unequal, the analysis might be different. Needs to have more robustness here
-def qual_check(fasta1, fasta2):
-    seqID=[]
-    seq=[]
-    for record1 in SeqIO.parse(fasta1, "fasta"):
-        seqID.append(record1.id)
-        seq.append(record1.seq)        
-    for record2 in SeqIO.parse(fasta2, "fasta"):
-        seqID.append(record2.id)
-        seq.append(record2.seq)
-    if len(seq[0])!=len(seq[1]):
-        raise Exception("Sequences need to be of the same length. Unequal sequences will have inconsistent results!")
+def make_temp_dir(outdir):
+    os.mkdir(os.path.join(outdir)+os.path.dirname(outdir))
+    temp_dir=tempfile.mkdtemp(dir=os.path.abspath(outdir))
+    return(temp_dir)
+
+
+def clean_temp_dir(temp_dir):
+    shutil.rmtree(temp_dir)
+
+
+def qual_check(fasta1, fasta2, TFdatabase, outdir, temp_dir):
+
+    with open (os.path.abspath(temp_dir)+'/mast_fasta_file','w') as multi_fa:
+        for record1 in SeqIO.parse(fasta1, "fasta"):
+            multi_fa.writelines('>'+str(record1.id)+'\n')
+            multi_fa.writelines(str(record1.seq)+'\n')
+            
+        for record2 in SeqIO.parse(fasta2, "fasta"):
+            multi_fa.writelines('>'+str(record2.id)+'\n')
+            multi_fa.writelines(str(record2.seq)+'\n')
+    
+    if len(str(record1.seq))!=len(str(record2.seq)):
+        raise Exception("Sequences need to be of the same length. Unequal sequences will have inconsistent results! Nonetheless, performing Alignemnt")
+        logger.debug("Sequences are not of same length")
     else:
-        print("Sequences are of same length. Performing pairwise alignment")
-    
-    #Creating a temp directory where you store your combined fasta file and store the alignemnt file as well. This directory will be deleted at the end
-    temp_dir=tempfile.mkdtemp(dir=os.path.dirname(fasta1))
-    multi_fa=open(os.path.abspath(temp_dir)+'/mast_fasta_file','w')
-    with open(fasta1,'r') as f1:
-        for each in f1.readlines():
-            multi_fa.write(each)
-        multi_fa.write('\n')
-    f1.close()
-    with open(fasta2,'r') as f2:
-        for each in f2.readlines():
-            multi_fa.write(each)
-        multi_fa.write('\n')
-    f2.close()
-    multi_fa.close()
-    
-    return(seq,seqID,multi_fa.name,temp_dir)
+        logger.debug("Sequences are of same length. Performing pairwise alignment")
+        
+    with open (os.path.abspath(outdir)+'/alignment.txt', 'w') as aligned:
+        alignment= pairwise2.align.globalxx(str(record1.seq),str(record2.seq))
+        aligned.write(format_alignment(*alignment[0]))
+    logger.debug("Alignment completed and written to file")
 
-#Program to align the fasta files provided by the user. This can provide some hint into the differences in the two sequences. This will be present in the out folder
-def run_align(seq1,seq2,temp_dir):
+    return(multi_fa.name)
 
-    aligned=open(os.path.abspath(temp_dir)+'/alignment.txt', 'w')
-    alignment= pairwise2.align.globalxx(seq1, seq2)
-    aligned.write(format_alignment(*alignment[0]))
-    aligned.close()
 
-    return(aligned)
-
-#The meme module needs to be loaded here. The mast output file is sent to the outfile described by the user. The hitlist is sent to the temp dir
-def run_mast(multi_fa,TF,outfile,temp_dir):
-    subprocess.run(['mast','-nostatus','-minseqs','1','-remcorr','-ev','10.0','-o',f"{outfile}",TF,multi_fa])
-    hits=open(temp_dir+'/TF_list.txt', 'w')
-    subprocess.run(['mast','-hit_list','-nostatus','-minseqs','1','-remcorr','-ev','10.0',TF,multi_fa], stdout=hits)
-    hits.close()
+def run_mast(fasta1, fasta2, TFdatabase, outdir, temp_dir, multi_fa):
+    subprocess.run(['mast','-nostatus','-minseqs','1','-remcorr','-ev','10.0','-o',f"{temp_dir+'/mastout'}",TFdatabase,multi_fa])
+    logger.debug("MAST run complete")
+    with open(temp_dir+'/TF_list.txt', 'w') as hits:
+        subprocess.run(['mast','-hit_list','-nostatus','-minseqs','1','-remcorr','-ev','10.0',TFdatabase,multi_fa], stdout=hits)
     return(hits.name)
 
 
-#Analyze the hit_list file and point out the differences. The alignment file is moved from the temporary folder to the output folder and temp dir is deleted
-def compare_mast(temp_dir,hits,seqID_1,seqID_2,outfile,aligned):
-    with open(hits,'r') as hit_file:
-        hits_1=[]
-        hits_2=[]
-        for each in hit_file:
-            if re.search('# sequence_name', each):
-                header=re.sub(r'# sequence_name',"sequence_name", each)
-            if each.split()[0]==seqID_1:
-                hits_1.append(each)
-            elif each.split()[0]==seqID_2:
-                hits_2.append(each)
-    hit_file.close()
+def compare_mast(fasta1, fasta2, TFdatabase, outdir, temp_dir, multi_fa, hits):
+    hits_df= pd.read_table (hits, skiprows=2, skipfooter=1, sep=r'\s{1,}', engine='python', header=None,
+                   names=["sequence_name","strand_sign_motif", "TF_id", "alt_id", "hit_start", "hit_end", "score", "pvalue"],
+                   index_col=False)
 
-    analysis=open(os.path.abspath(outfile)+'/analysis_file.txt', 'w')
+    hits_differences= hits_df.drop_duplicates(subset=["strand_sign_motif", "TF_id", "alt_id", "hit_start", "hit_end", "score", "pvalue"], keep=False, ignore_index=True)
+    seq_IDs=hits_differences.sequence_name.unique()
 
-    if len(hits_1)==len(hits_2):
-        analysis.write("The two sequences have equal number of TF binding motifs, check further for detailed analysis\n")
-    analysis.write("###################################################################################################\n")
+    hits_diff_set1 = hits_differences[hits_differences.sequence_name==seq_IDs[0]]
+    hits_diff_set1 = hits_diff_set1.reset_index()
+    hits_diff_set1= hits_diff_set1.drop(columns="index")
+    hits_diff_set2 = hits_differences[hits_differences.sequence_name==seq_IDs[1]]
+    hits_diff_set2 = hits_diff_set2.reset_index()
+    hits_diff_set2= hits_diff_set2.drop(columns="index")
+
+
+    if len(hits_diff_set1) >= len(hits_diff_set2):
+        hits_bigger =hits_diff_set1
+        hits_smaller=hits_diff_set2
+    else:
+        hits_bigger =hits_diff_set2
+        hits_smaller=hits_diff_set1
+
+    i=len(hits_bigger)
+    j=len(hits_smaller)
+
+    diff_category=[]
+    analysis=[]
+    sequence_id=[]
+    result_dict={'sequence_name2':sequence_id, 'differential_category':diff_category,'analysis':analysis}
+
+    while i>0:
+        while j>0:
+            if (hits_bigger.TF_id[i-1]==hits_smaller.TF_id[j-1]) & (hits_bigger.hit_start[i-1]==hits_smaller.hit_start[j-1]) & (hits_bigger.hit_end[i-1]==hits_smaller.hit_end[j-1]):
+                sequence_id.append(hits_bigger.sequence_name[i-1])
+                diff_category.extend(["hit_p-value"])
+                analysis.extend([f'p-value of binding changed from {hits_bigger.pvalue[i-1]} to {hits_smaller.pvalue[i-1]}'])
+                j=j-1
+        
+            elif (hits_bigger.TF_id[i-1]==hits_smaller.TF_id[j-1]) & (hits_bigger.hit_start[i-1]!=hits_smaller.hit_start[j-1]) or (hits_bigger.hit_end[i-1]==hits_smaller.hit_end[j-1]):
+                sequence_id.append(hits_bigger.sequence_name[i-1])
+                diff_category.extend(["hit_start hit_end"])
+                analysis.extend([f'TF binding position changed from {hits_bigger.hit_start[i-1]} and {hits_bigger.hit_end[i-1]} to {hits_smaller.hit_start[j-1]} and {hits_smaller.hit_end[j-1]}'])
+                j=j-1
+
+            elif (hits_bigger.TF_id[i-1]!=hits_smaller.TF_id[j-1]):
+                sequence_id.append(hits_bigger.sequence_name[i-1])
+                diff_category.append("TF_id")
+                analysis.append(f'The Transcription factor {hits_bigger.TF_id[i-1]} is present only in {hits_bigger.sequence_name[i-1]}. Check the adjoining position for more info')
+                j=j-1
             
-    tf=len(hits_1)
-    while tf>=0:
-        if hits_1[tf-1].split()[1:]!=hits_2[tf-1].split()[1:]:
-            if hits_1[tf-1].split()[2]!=hits_2[tf-1].split()[2]:
-                analysis.write(f'{header}\n')
-                analysis.write(f'{hits_1[tf-1]}')
-                analysis.write(f'{hits_2[tf-1]}\n')
-                analysis.write('Analysis: There is a difference in binding of the TF %s vs %s between the sequences' %({hits_1[tf-1].split()[2]},{hits_2[tf-1].split()[2]})+'\n')
-                analysis.write(f'Analysis: The position where this difference occurs is at the position: %s' %({hits_1[tf-1].split()[1]})+'\n')
-                analysis.write("#######################################################################################################################################\n")        
-            if hits_1[tf-1].split()[2] == hits_2[tf-1].split()[2]:
-                analysis.write(f'{header}\n')
-                analysis.write(f'{hits_1[tf-1]}')
-                analysis.write(f'{hits_2[tf-1]}\n')
-                if hits_1[tf-1].split()[1] != hits_2[tf-1].split()[1]:
-                    analysis.write("Analysis: There is no difference in binding of the TF, but the position of binding has shifted from %s to %s between the two sequences" %({hits_1[tf-1].split()[1]},{hits_2[tf-1].split()[1]})+'\n')
-                    analysis.write("#######################################################################################################################################\n")
-                if hits_1[tf-1].split()[-1] != hits_2[tf-1].split()[-1]:
-                    analysis.write("Analysis: There is no difference in binding of the TF, but the p-value of binding has changed from %s to %s between the two sequences" %({hits_1[tf-1].split()[-1]},{hits_2[tf-1].split()[-2]})+'\n')
-                    analysis.write("#######################################################################################################################################\n")
-                if hits_1[tf-1].split()[4] != hits_2[tf-1].split()[4] or hits_1[tf-1].split()[5] != hits_2[tf-1].split()[5]:
-                    analysis.write("Analysis: There is no difference in binding of the TF, but the position of binding has chnaged from %s & %s to %s and %s between the two sequences" %({hits_1[tf-1].split()[4]},{hits_1[tf-1].split()[5]},{hits_2[tf-1].split()[4]},{hits_2[tf-1].split()[5]})+'\n')
-                    analysis.write("#######################################################################################################################################\n")
-        tf=tf-1
+            i=i-1
 
-    analysis.close()
-    subprocess.run(['mv',str(aligned.name),str(os.path.abspath(outfile))])
-    shutil.rmtree(temp_dir)
+    result_dict_df=pd.DataFrame(result_dict)
+    final_out=pd.concat([hits_bigger, result_dict_df], axis=1)
+    final_out=final_out.drop(columns="sequence_name2")
+    final_out.to_csv(os.path.join(outdir, 'analysis.txt'), sep='\t')
+
 
 if __name__=='__main__':
     main()
+
+
+
 
